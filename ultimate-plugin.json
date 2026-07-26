@@ -1,0 +1,88 @@
+{
+  "protocol_version": "1.0",
+  "plugin": {
+    "id": "video.javbus",
+    "name": "JavBus",
+    "version": "0.1.0",
+    "entrypoint": "./ultimate_provider.py:JavBusProvider",
+    "config_key": "javbus"
+  },
+  "media_types": ["video"],
+  "identity": {
+    "content_type": "video",
+    "host_id_prefix": "BUS",
+    "platform_label": "JavBus",
+    "aliases": ["javbus", "bus"]
+  },
+  "presentation": {
+    "media_card": {
+      "cover": {
+        "aspect_ratio": "3 / 2",
+        "fit": "cover"
+      },
+      "badge": {
+        "show_platform_label": true,
+        "label": "JavBus"
+      }
+    }
+  },
+  "capabilities": [
+    { "key": "catalog.search" },
+    { "key": "catalog.detail" },
+    { "key": "person.search" },
+    { "key": "person.works" },
+    { "key": "asset.cover.fetch" },
+    { "key": "asset.preview.resolve" },
+    { "key": "health.query.status" },
+    { "key": "playback.proxy.stream" },
+    { "key": "playback.proxy.url" },
+    { "key": "transport.http.request" }
+  ],
+  "configuration": {
+    "order": 40,
+    "label": "JavBus",
+    "sections": [
+      {
+        "id": "basic",
+        "label": "基础配置",
+        "fields": [
+          { "key": "enabled", "label": "启用", "type": "boolean" },
+          { "key": "cookie_string", "label": "Cookie", "type": "textarea", "placeholder": "existmag=all; over18=18", "secret": true, "help": "建议填入 existmag=all 以显示磁力链接" },
+          { "key": "domain", "label": "站点域名", "type": "text", "placeholder": "https://www.javbus.com" },
+          { "key": "movie_type", "label": "影片类型", "type": "select", "placeholder": "normal", "options": [
+            { "label": "有码", "value": "normal" },
+            { "label": "无码", "value": "uncensored" }
+          ] },
+          { "key": "timeout_seconds", "label": "请求超时秒数", "type": "number", "placeholder": "30" },
+          { "key": "proxy", "label": "HTTP 代理", "type": "text", "placeholder": "http://127.0.0.1:7890" }
+        ]
+      }
+    ]
+  },
+  "resource_policy": {
+    "assets": {
+      "image": {
+        "available": true,
+        "download_enabled": true,
+        "request_profiles": [
+          {
+            "match_hosts": ["javbus.com", "pics.dmm.co.jp"],
+            "referer": "https://www.javbus.com/",
+            "proxy_mode": "frontend"
+          }
+        ]
+      },
+      "cover": {
+        "available": true,
+        "download_enabled": true,
+        "request_profiles": [
+          {
+            "match_hosts": ["javbus.com", "pics.dmm.co.jp"],
+            "referer": "https://www.javbus.com/",
+            "proxy_mode": "frontend"
+          }
+        ]
+      }
+    }
+  }
+}
