@@ -1,9 +1,9 @@
 {
-  "protocol_version": "1.0",
+  "protocol_version": "2.0",
   "plugin": {
     "id": "video.javbus",
     "name": "JavBus",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "entrypoint": "./ultimate_provider.py:JavBusProvider",
     "config_key": "javbus"
   },
@@ -18,6 +18,7 @@
     "media_card": {
       "cover": {
         "aspect_ratio": "3 / 2",
+        "mobile_aspect_ratio": "3 / 2",
         "fit": "cover"
       },
       "badge": {
@@ -34,25 +35,27 @@
     { "key": "asset.cover.fetch" },
     { "key": "asset.preview.resolve" },
     { "key": "health.query.status" },
-    { "key": "playback.proxy.stream" },
     { "key": "playback.proxy.url" },
     { "key": "transport.http.request" }
   ],
   "configuration": {
     "order": 40,
     "label": "JavBus",
+    "credential": {
+      "enabled_field": "enabled",
+      "required_fields": [],
+      "disabled_message": "JavBus 未启用，不能使用该平台查询。"
+    },
     "sections": [
       {
         "id": "basic",
         "label": "基础配置",
         "fields": [
           { "key": "enabled", "label": "启用", "type": "boolean" },
-          { "key": "cookie_string", "label": "Cookie", "type": "textarea", "placeholder": "existmag=all; over18=18", "secret": true, "help": "建议填入 existmag=all 以显示磁力链接" },
+          { "key": "cookie_string", "label": "Cookie", "type": "textarea", "placeholder": "existmag=all; over18=18", "secret": true, "help": "可选。建议填入 existmag=all，否则详情页不显示磁力链接" },
           { "key": "domain", "label": "站点域名", "type": "text", "placeholder": "https://www.javbus.com" },
-          { "key": "movie_type", "label": "影片类型", "type": "select", "placeholder": "normal", "options": [
-            { "label": "有码", "value": "normal" },
-            { "label": "无码", "value": "uncensored" }
-          ] },
+          { "key": "movie_type", "label": "影片类型", "type": "text", "placeholder": "normal", "help": "normal=有码（默认），uncensored=无码；其它值按 normal 处理" },
+          { "key": "user_agent", "label": "User-Agent", "type": "text", "placeholder": "留空使用内置桌面浏览器标识" },
           { "key": "timeout_seconds", "label": "请求超时秒数", "type": "number", "placeholder": "30" },
           { "key": "proxy", "label": "HTTP 代理", "type": "text", "placeholder": "http://127.0.0.1:7890" }
         ]
@@ -68,7 +71,8 @@
           {
             "match_hosts": ["javbus.com", "pics.dmm.co.jp"],
             "referer": "https://www.javbus.com/",
-            "proxy_mode": "frontend"
+            "proxy_mode": "frontend",
+            "frontend_proxy": true
           }
         ]
       },
@@ -79,10 +83,25 @@
           {
             "match_hosts": ["javbus.com", "pics.dmm.co.jp"],
             "referer": "https://www.javbus.com/",
-            "proxy_mode": "frontend"
+            "proxy_mode": "frontend",
+            "frontend_proxy": true
           }
         ]
       }
+    }
+  },
+  "packaging": {
+    "android": {
+      "enabled": true,
+      "pip_options": ["--no-deps"],
+      "pip_install_args": [],
+      "pip_requirements": ["curl-cffi", "beautifulsoup4", "lxml"]
+    },
+    "external": {
+      "pip_requirements": ["curl-cffi", "beautifulsoup4", "lxml"]
+    },
+    "pyinstaller": {
+      "pip_requirements": ["curl-cffi", "beautifulsoup4", "lxml"]
     }
   }
 }

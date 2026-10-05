@@ -29,6 +29,32 @@ DEFAULT_USER_AGENT = (
 
 _TOKEN_MASK_VALUES = {"", "********", "******", "__KEEP__"}
 
+SUPPORTED_CAPABILITIES = frozenset(
+    {
+        "catalog.search",
+        "catalog.detail",
+        "person.search",
+        "person.works",
+        "asset.cover.fetch",
+        "asset.preview.resolve",
+        "health.query.status",
+        "playback.proxy.url",
+        "transport.http.request",
+    }
+)
+
+_HTML_PARSERS = ("lxml", "html.parser")
+
+
+def _make_soup(html: Any) -> BeautifulSoup:
+    """优先 lxml，缺失时回退标准库解析器（Android/Chaquopy 环境更稳）。"""
+    for parser in _HTML_PARSERS:
+        try:
+            return BeautifulSoup(html, parser)
+        except Exception:
+            continue
+    return BeautifulSoup(html, "html.parser")
+
 
 def _as_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -110,9 +136,12 @@ class JavBusProvider(ProtocolProvider):
     def normalize_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         raw = dict(payload or {})
         normalized: Dict[str, Any] = {}
-        normalized["enabled"] = _as_bool(raw.get("enabled"), True)
+        normalized["enabled"] = _as_bool(raw.get("enabled"), False)
         normalized["domain"] = _normalize_domain(raw.get("domain"))
-        normalized["cookie_string"] = str(raw.get("cookie_string") or "").strip()
+        # 掩码/空值不写回，避免保存配置时把已存的 Cookie 清空（宿主侧已无密文保护）
+        raw_cookie = str(raw.get("cookie_string") or "").strip()
+        if raw_cookie and raw_cookie not in _TOKEN_MASK_VALUES:
+            normalized["cookie_string"] = raw_cookie
         normalized["user_agent"] = str(raw.get("user_agent") or "").strip() or DEFAULT_USER_AGENT
         normalized["movie_type"] = str(raw.get("movie_type") or "normal").strip().lower()
         if normalized["movie_type"] not in ("normal", "uncensored"):
@@ -130,7 +159,7 @@ class JavBusProvider(ProtocolProvider):
 
     def get_query_status(self, config: Dict[str, Any]) -> Dict[str, Any]:
         normalized = self.normalize_config(config)
-        enabled = _as_bool(normalized.get("enabled"), True)
+        enabled = _as_bool(normalized.get("enabled"), False)
         domain = str(normalized.get("domain") or "").strip()
         configured = bool(enabled and domain)
         return {
@@ -205,7 +234,11 @@ class JavBusProvider(ProtocolProvider):
         return None
 
     def _domain(self, config: Dict[str, Any]) -> str:
-        return str(config.get("domain") or DEFAULT_DOMAIN).rstrip("/")
+        base = str(config.get("domain") or DEFAULT_DOMAIN).rstrip("/")
+        if str(config.get("movie_type") or "normal").strip().lower() == "uncensored":
+            # 无码分区走 /uncensored 路径；默认 normal 时行为与旧版完全一致
+            return f"{base}/uncensored"
+        return base
 
     def _download_file(
         self,
@@ -266,7 +299,7 @@ class JavBusProvider(ProtocolProvider):
 
     def _parse_search_results(self, html: str) -> List[Dict[str, Any]]:
         """解析搜索结果的 HTML，返回 video summary 列表。"""
-        soup = BeautifulSoup(html, "lxml")
+        soup = _make_soup(html)
         results: List[Dict[str, Any]] = []
         for item in soup.select("a.movie-box"):
             parsed = self._parse_search_item(item)
@@ -276,7 +309,7 @@ class JavBusProvider(ProtocolProvider):
 
     def _parse_detail_page(self, html: str, movie_id: str) -> Optional[Dict[str, Any]]:
         """解析影片详情页 HTML。"""
-        soup = BeautifulSoup(html, "lxml")
+        soup = _make_soup(html)
 
         # 标题
         title_tag = soup.select_one("div.container h3")
@@ -416,7 +449,7 @@ class JavBusProvider(ProtocolProvider):
 
     def _parse_magnets(self, html: str) -> List[Dict[str, Any]]:
         """解析磁力链接 AJAX 返回的 HTML 表格。"""
-        soup = BeautifulSoup(html, "lxml")
+        soup = _make_soup(html)
         magnets: List[Dict[str, Any]] = []
         for tr in soup.select("tr"):
             tds = tr.select("td")
@@ -476,7 +509,7 @@ class JavBusProvider(ProtocolProvider):
 
     def _parse_star_id_from_detail(self, html: str) -> Dict[str, str]:
         """从详情页提取演员 ID -> 名称映射。"""
-        soup = BeautifulSoup(html, "lxml")
+        soup = _make_soup(html)
         result: Dict[str, str] = {}
         for star_a in soup.select("a[href*='/star/']"):
             href = star_a.get("href", "")
@@ -502,13 +535,29 @@ class JavBusProvider(ProtocolProvider):
 
     # ---------- 协议入口 ----------
 
+    def _declared_capabilities(self) -> set:
+        """以清单声明为准；清单缺少 capabilities 时回退到代码内置能力集。"""
+        raw = None
+        if isinstance(self.manifest, dict):
+            raw = self.manifest.get("capabilities")
+        declared = {
+            str((item or {}).get("key") or "").strip()
+            for item in (raw or [])
+            if isinstance(item, dict)
+        }
+        declared.discard("")
+        return declared or set(SUPPORTED_CAPABILITIES)
+
     def execute(self, capability: str, params: Dict[str, Any], context: Dict[str, Any], config: Dict[str, Any]):
         normalized = self.normalize_config(config)
-        if not _as_bool(normalized.get("enabled"), True):
-            raise RuntimeError("JavBus 插件未启用。")
+        if capability not in self._declared_capabilities():
+            raise ValueError(f"unsupported capability: {capability}")
 
         if capability == "health.query.status":
             return self.get_query_status(config)
+
+        if not _as_bool(normalized.get("enabled"), False):
+            raise RuntimeError("JavBus 插件未启用。")
 
         session = self._build_session(normalized)
 
@@ -524,13 +573,8 @@ class JavBusProvider(ProtocolProvider):
             return self._handle_cover_fetch(session, normalized, params)
         if capability == "asset.preview.resolve":
             return self._handle_preview_resolve(session, normalized, params)
-
         if capability == "playback.proxy.url":
             return self._handle_proxy_url(session, normalized, params)
-
-        if capability == "playback.proxy.stream":
-            return self._handle_proxy_stream(session, normalized, params)
-
         if capability == "transport.http.request":
             return self._handle_http_request(session, normalized, params)
 
@@ -576,7 +620,7 @@ class JavBusProvider(ProtocolProvider):
                 all_videos.append(self._to_video_summary(item))
 
             # 检查是否有下一页：翻页链接是否存在
-            soup = BeautifulSoup(str(html), "lxml")
+            soup = _make_soup(str(html))
             next_link = soup.select_one(f'a[href*="/search/{encoded_keyword}/{p + 1}"]')
             has_next = next_link is not None
             if not has_next:
@@ -737,7 +781,7 @@ class JavBusProvider(ProtocolProvider):
                     "platform": JAVBUS_PLATFORM,
                 })
 
-            soup = BeautifulSoup(str(html), "lxml")
+            soup = _make_soup(str(html))
             next_link = soup.select_one(f'a[href*="/star/{actor_id}/{p + 1}"]')
             has_more = next_link is not None
             if not has_more:
@@ -858,29 +902,9 @@ class JavBusProvider(ProtocolProvider):
             headers=req_headers,
             impersonate="chrome",
             timeout=timeout,
-            stream=False,
+            stream=True,
         )
         return response
-
-    def _handle_proxy_stream(
-        self,
-        session: requests.Session,
-        config: Dict[str, Any],
-        params: Dict[str, Any],
-    ):
-        """处理 playback.proxy.stream — 代理流式请求。"""
-        method = str(params.get("method") or "GET").upper()
-        domain = str(params.get("domain") or "").strip()
-        path = str(params.get("path") or "").strip()
-        query_string = str(params.get("query_string") or "").strip()
-        incoming_referer = str(params.get("incoming_referer") or "").strip()
-
-        # JavBus 没有在线播放功能，返回 501
-        return type("ProxyResponse", (), {
-            "content": b"JavBus does not support streaming",
-            "status_code": 501,
-            "headers": [("Content-Type", "text/plain")],
-        })()
 
     def _handle_http_request(
         self,
